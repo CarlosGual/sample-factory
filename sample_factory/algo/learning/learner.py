@@ -1061,3 +1061,4 @@ class Learner(Configurable):
                 stats[STATS_KEY] = memory_stats("learner", self.device)
 
             return stats
+

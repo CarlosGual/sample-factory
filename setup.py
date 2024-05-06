@@ -52,7 +52,7 @@ setup(
     },
     install_requires=[
         "numpy>=1.18.1,<2.0",
-        "torch>=1.9,<3.0,!=1.13.0",
+        "torch>=1.9,<2.0,!=1.13.0", # for drakee GPUs
         "gymnasium>=0.27,<1.0",
         "pyglet",  # gym dependency
         "tensorboard>=1.15.0",
@@ -82,7 +82,7 @@ setup(
         # "dmlab": ["dm_env"],  <-- these are just auxiliary packages, the main package has to be built from sources
     },
     package_dir={"": "./"},
-    packages=setuptools.find_packages(where="./", include=["sample_factory*", "sf_examples*"]),
+    packages=setuptools.find_packages(where="./", include=["sample_factory*", "sf_examples*", "sefar_rl*"]),
     include_package_data=True,
     python_requires=">=3.8",
 )

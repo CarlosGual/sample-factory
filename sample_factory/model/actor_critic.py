@@ -320,5 +320,7 @@ def create_actor_critic(cfg: Config, obs_space: ObsSpace, action_space: ActionSp
     # check if user specified custom actor/critic creation function
     from sample_factory.algo.utils.context import global_model_factory
 
+    model_factory = global_model_factory()
     make_actor_critic_func = global_model_factory().make_actor_critic_func
-    return make_actor_critic_func(cfg, obs_space, action_space)
+
+    return make_actor_critic_func(model_factory, cfg, obs_space, action_space)
