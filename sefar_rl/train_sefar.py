@@ -1,6 +1,8 @@
 import functools
 import sys
 
+import torch
+
 from sample_factory.algo.utils.context import global_model_factory
 from sample_factory.cfg.arguments import parse_full_cfg, parse_sf_args
 from sample_factory.envs.env_utils import register_env
@@ -44,9 +46,11 @@ def main():  # pragma: no cover
     """Script entry point."""
     register_vizdoom_components()
     cfg = parse_vizdoom_cfg()
-    status = run_rl(cfg)
+    with torch.autograd.detect_anomaly(check_nan=True):
+        status = run_rl(cfg)
     return status
 
 
 if __name__ == "__main__":  # pragma: no cover
+    # torch.autograd.set_detect_anomaly(True)
     sys.exit(main())

@@ -20,8 +20,9 @@ python -m sefar_rl.train_sefar \
  --serial_mode False \
  --env_frameskip 4 \
  --use_rnn True \
- --num_workers 20 \
+ --worker_num_splits 2 \
  --num_envs_per_worker 32 \
+ --num_workers 20 \
  --num_policies 1 \
  --batch_size 4096 \
  --experiment $EXPERIMENT \
@@ -29,7 +30,6 @@ python -m sefar_rl.train_sefar \
  --res_h 72 \
  --wide_aspect_ratio False \
  --policy_workers_per_policy 2 \
- --worker_num_splits 2 \
  --with_wandb True \
  --wandb_user aklab \
  --wandb_project sefar-rl \

@@ -9,6 +9,15 @@ from torch import Tensor, nn
 from sample_factory.algo.utils.tensor_dict import TensorDict
 from sample_factory.utils.typing import ActionSpace, Config, ObsSpace
 from sample_factory.algo.utils.action_distributions import sample_actions_log_probs
+from sample_factory.utils.utils import log
+
+
+def check_tensor(tensor, tensor_name):
+    # print(f'Checking {tensor_name}')
+    if torch.any(torch.isnan(tensor)):
+        print(f'NaN found in {tensor_name}')
+    if torch.any(torch.isinf(tensor)):
+        print(f'Inf found in {tensor_name}')
 
 
 class SefarActorCritic(ActorCritic):
@@ -72,23 +81,32 @@ class SefarActorCritic(ActorCritic):
 
     def forward_head(self, normalized_obs_dict: Dict[str, Tensor]) -> Tensor:
         x = self.encoder(normalized_obs_dict)
+        check_tensor(x, 'x after forward_head')
         return x
 
     def forward_core(self, head_output: Tensor, rnn_states):
         x, new_rnn_states = self.core(head_output, rnn_states)
+        # check_tensor(x, 'x after forward_core')
+        check_tensor(new_rnn_states, 'new_rnn_states')
         return x, new_rnn_states
 
     def forward_tail(self, core_output, values_only: bool, sample_actions: bool) -> TensorDict:
         if self.cfg.update_mask:
             self.mask = self._update_mask(core_output.shape)
 
+        check_tensor(core_output, 'before masked core_output')
         core_output_sparse = core_output * self.mask
+        check_tensor(core_output_sparse, 'after masked core_output_sparse')
 
         decoder_output1 = self.decoder1(core_output)
+        check_tensor(decoder_output1, 'decoder_output1')
         decoder_output2 = self.decoder2(core_output_sparse)
+        check_tensor(decoder_output2, 'decoder_output2')
 
         values1 = self.critic_linear1(decoder_output1).squeeze()
+        check_tensor(values1, 'values1')
         values2 = self.critic_linear2(decoder_output2).squeeze()
+        check_tensor(values2, 'values2')
 
         if self.cfg.forward_head == 1:
             values = values1
@@ -100,7 +118,9 @@ class SefarActorCritic(ActorCritic):
             return result
 
         action_distribution_params1, self.last_action_distribution1 = self.action_parameterization1(decoder_output1)
+        check_tensor(action_distribution_params1, 'action_distribution_params1')
         action_distribution_params2, self.last_action_distribution2 = self.action_parameterization2(decoder_output2)
+        check_tensor(action_distribution_params2, 'action_distribution_params2')
 
         # `action_logits` is not the best name here, better would be "action distribution parameters"
         if self.cfg.forward_head == 1:
@@ -108,7 +128,7 @@ class SefarActorCritic(ActorCritic):
         elif self.cfg.forward_head == 2:
             result["action_logits"] = action_distribution_params2
 
-        self._maybe_sample_actions(sample_actions, result) ## SEEMS TO NOT BE USED
+        self._maybe_sample_actions(sample_actions, result)
         return result
 
     def forward(self, normalized_obs_dict, rnn_states, values_only=False) -> TensorDict:

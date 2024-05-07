@@ -225,190 +225,193 @@ class SefarLearner(Learner):
             self, gpu_buffer: TensorDict, batch_size: int, experience_size: int, num_invalids: int
     ) -> Optional[AttrDict]:
         timing = self.timing
-        with torch.no_grad():
-            early_stopping_tolerance = 1e-6
-            early_stop = False
-            prev_epoch_actor_loss = 1e9
-            epoch_actor_losses = torch.empty([self.cfg.num_batches_per_epoch], device=self.device)
+        with torch.autograd.detect_anomaly(check_nan=True):
+            with torch.no_grad():
+                early_stopping_tolerance = 1e-6
+                early_stop = False
+                prev_epoch_actor_loss = 1e9
+                epoch_actor_losses = torch.empty([self.cfg.num_batches_per_epoch], device=self.device)
 
-            # recent mean KL-divergences per minibatch, this used by LR schedulers
-            recent_kls = []
+                # recent mean KL-divergences per minibatch, this used by LR schedulers
+                recent_kls = []
 
-            if self.cfg.with_vtrace:
-                assert (
-                        self.cfg.recurrence == self.cfg.rollout and self.cfg.recurrence > 1
-                ), "V-trace requires to recurrence and rollout to be equal"
+                if self.cfg.with_vtrace:
+                    assert (
+                            self.cfg.recurrence == self.cfg.rollout and self.cfg.recurrence > 1
+                    ), "V-trace requires to recurrence and rollout to be equal"
 
-            num_sgd_steps = 0
-            stats_and_summaries: Optional[AttrDict] = None
+                num_sgd_steps = 0
+                stats_and_summaries: Optional[AttrDict] = None
 
-            # When it is time to record train summaries, we randomly sample epoch/batch for which the summaries are
-            # collected to get equal representation from different stages of training.
-            # Half the time, we record summaries from the very large step of training. There we will have the highest
-            # KL-divergence and ratio of PPO-clipped samples, which makes this data even more useful for analysis.
-            # Something to consider: maybe we should have these last-batch metrics in a separate summaries category?
-            with_summaries = self._should_save_summaries()
-            if np.random.rand() < 0.5:
-                summaries_epoch = np.random.randint(0, self.cfg.num_epochs)
-                summaries_batch = np.random.randint(0, self.cfg.num_batches_per_epoch)
-            else:
-                summaries_epoch = self.cfg.num_epochs - 1
-                summaries_batch = self.cfg.num_batches_per_epoch - 1
+                # When it is time to record train summaries, we randomly sample epoch/batch for which the summaries are
+                # collected to get equal representation from different stages of training.
+                # Half the time, we record summaries from the very large step of training. There we will have the highest
+                # KL-divergence and ratio of PPO-clipped samples, which makes this data even more useful for analysis.
+                # Something to consider: maybe we should have these last-batch metrics in a separate summaries category?
+                with_summaries = self._should_save_summaries()
+                if np.random.rand() < 0.5:
+                    summaries_epoch = np.random.randint(0, self.cfg.num_epochs)
+                    summaries_batch = np.random.randint(0, self.cfg.num_batches_per_epoch)
+                else:
+                    summaries_epoch = self.cfg.num_epochs - 1
+                    summaries_batch = self.cfg.num_batches_per_epoch - 1
 
-            assert self.actor_critic.training
+                assert self.actor_critic.training
 
-        for epoch in range(self.cfg.num_epochs):
-            with timing.add_time("epoch_init"):
-                if early_stop:
+            for epoch in range(self.cfg.num_epochs):
+                with timing.add_time("epoch_init"):
+                    if early_stop:
+                        break
+
+                    force_summaries = False
+                    minibatches = self._get_minibatches(batch_size, experience_size)
+
+                for batch_num in range(len(minibatches)):
+                    with torch.no_grad(), timing.add_time("minibatch_init"):
+                        indices = minibatches[batch_num]
+
+                        # current minibatch consisting of short trajectory segments with length == recurrence
+                        mb = self._get_minibatch(gpu_buffer, indices)
+
+                        # enable syntactic sugar that allows us to access dict's keys as object attributes
+                        mb = AttrDict(mb)
+
+                    with timing.add_time("calculate_losses"):
+                        (
+                            action_distribution1,
+                            policy_loss1,
+                            exploration_loss1,
+                            kl_old1,
+                            kl_loss1,
+                            value_loss1,
+                            action_distribution2,
+                            policy_loss2,
+                            exploration_loss2,
+                            kl_old2,
+                            kl_loss2,
+                            value_loss2,
+                            loss_locals,
+                        ) = self._calculate_losses(mb, num_invalids)
+
+                    with timing.add_time("losses_postprocess"):
+                        # noinspection PyTypeChecker
+                        actor_loss1: Tensor = policy_loss1 + exploration_loss1 + kl_loss1
+                        critic_loss1 = value_loss1
+                        ppo_loss1: Tensor = actor_loss1 + critic_loss1
+
+                        actor_loss2: Tensor = policy_loss2 + exploration_loss2 + kl_loss2
+                        critic_loss2 = value_loss2
+                        ppo_loss2: Tensor = actor_loss2 + critic_loss2
+
+                        epoch_actor_losses[batch_num] = (actor_loss1 + actor_loss2)/2
+
+                        divergence_loss = torch.nn.KLDivLoss(reduction="batchmean", log_target=True)
+                        # print('ppo losses', ppo_loss2, ppo_loss1)
+                        logits_l1 = action_distribution1.log_probs/self.cfg.temp
+                        logits_l2 = action_distribution2.log_probs.detach()/self.cfg.temp
+                        kd_loss = divergence_loss(logits_l1, logits_l2)
+                        # print('logits l1', logits_l1.shape, 'logits_l2', logits_l2.shape,'kd loss', kd_loss)
+                        loss = ppo_loss1 + ppo_loss2 + self.cfg.weight_kd * kd_loss
+
+                        high_loss = 30.0
+                        if torch.abs(loss) > high_loss:
+                            log.warning(
+                                "High loss value: l:%.4f pl:%.4f vl:%.4f exp_l:%.4f kl_l:%.4f (recommended to adjust the --reward_scale parameter)",
+                                to_scalar(loss),
+                                to_scalar(policy_loss1 + policy_loss2),
+                                to_scalar(value_loss1 + value_loss2),
+                                to_scalar(exploration_loss1 + exploration_loss2),
+                                to_scalar(kl_loss1 + kl_loss2),
+                            )
+
+                            # perhaps something weird is happening, we definitely want summaries from this step
+                            force_summaries = True
+
+                    with torch.no_grad(), timing.add_time("kl_divergence"):
+                        # if kl_old is not None, it is already calculated above
+                        if kl_old1 is None:
+                            # calculate KL-divergence with the behaviour policy action distribution
+                            old_action_distribution = get_action_distribution(
+                                self.actor_critic.action_space,
+                                mb.action_logits,
+                            )
+                            kl_old1 = action_distribution1.kl_divergence(old_action_distribution)
+                            kl_old1 = masked_select(kl_old1, mb.valids, num_invalids)
+                            kl_old2 = action_distribution2.kl_divergence(old_action_distribution)
+                            kl_old2 = masked_select(kl_old2, mb.valids, num_invalids)
+
+                        kl_old_mean = (kl_old1.mean().item() + kl_old2.mean().item())/2
+                        recent_kls.append(kl_old_mean)
+                        if kl_old1.max().item() > 100:
+                            log.warning(f"KL-divergence is very high: {kl_old1.max().item():.4f}")
+
+                    # update the weights
+                    with timing.add_time("update"):
+                        # following advice from https://youtu.be/9mS1fIYj1So set grad to None instead of optimizer.zero_grad()
+                        for p in self.actor_critic.parameters():
+                            p.grad = None
+
+                        loss.backward()
+
+                        if self.cfg.max_grad_norm > 0.0:
+                            with timing.add_time("clip"):
+                                torch.nn.utils.clip_grad_norm_(self.actor_critic.parameters(), self.cfg.max_grad_norm)
+
+                        curr_policy_version = self.train_step  # policy version before the weight update
+
+                        actual_lr = self.curr_lr
+                        if num_invalids > 0:
+                            # if we have masked (invalid) data we should reduce the learning rate accordingly
+                            # this prevents a situation where most of the data in the minibatch is invalid
+                            # and we end up doing SGD with super noisy gradients
+                            actual_lr = self.curr_lr * (experience_size - num_invalids) / experience_size
+                        self._apply_lr(actual_lr)
+
+                        with self.param_server.policy_lock:
+                            self.optimizer.step()
+
+                        num_sgd_steps += 1
+
+                    with torch.no_grad(), timing.add_time("after_optimizer"):
+                        self._after_optimizer_step()
+
+                        if self.lr_scheduler.invoke_after_each_minibatch():
+                            self.curr_lr = self.lr_scheduler.update(self.curr_lr, recent_kls)
+
+                        # collect and report summaries
+                        should_record_summaries = with_summaries
+                        should_record_summaries &= epoch == summaries_epoch and batch_num == summaries_batch
+                        should_record_summaries |= force_summaries
+                        if should_record_summaries:
+                            # hacky way to collect all of the intermediate variables for summaries
+                            summary_vars = {**loss_locals, **locals()}
+                            stats_and_summaries = self._record_summaries(AttrDict(summary_vars))
+                            force_summaries = False
+
+                        # make sure everything (such as policy weights) is committed to shared device memory
+                        synchronize(self.cfg, self.device)
+                        # this will force policy update on the inference worker (policy worker)
+                        self.policy_versions_tensor[self.policy_id] = self.train_step
+
+                # end of an epoch
+                if self.lr_scheduler.invoke_after_each_epoch():
+                    self.curr_lr = self.lr_scheduler.update(self.curr_lr, recent_kls)
+
+                new_epoch_actor_loss = epoch_actor_losses.mean().item()
+                loss_delta_abs = abs(prev_epoch_actor_loss - new_epoch_actor_loss)
+                if loss_delta_abs < early_stopping_tolerance:
+                    early_stop = True
+                    log.debug(
+                        "Early stopping after %d epochs (%d sgd steps), loss delta %.7f",
+                        epoch + 1,
+                        num_sgd_steps,
+                        loss_delta_abs,
+                    )
                     break
 
-                force_summaries = False
-                minibatches = self._get_minibatches(batch_size, experience_size)
+                prev_epoch_actor_loss = new_epoch_actor_loss
 
-            for batch_num in range(len(minibatches)):
-                with torch.no_grad(), timing.add_time("minibatch_init"):
-                    indices = minibatches[batch_num]
-
-                    # current minibatch consisting of short trajectory segments with length == recurrence
-                    mb = self._get_minibatch(gpu_buffer, indices)
-
-                    # enable syntactic sugar that allows us to access dict's keys as object attributes
-                    mb = AttrDict(mb)
-
-                with timing.add_time("calculate_losses"):
-                    (
-                        action_distribution1,
-                        policy_loss1,
-                        exploration_loss1,
-                        kl_old1,
-                        kl_loss1,
-                        value_loss1,
-                        action_distribution2,
-                        policy_loss2,
-                        exploration_loss2,
-                        kl_old2,
-                        kl_loss2,
-                        value_loss2,
-                        loss_locals,
-                    ) = self._calculate_losses(mb, num_invalids)
-
-                with timing.add_time("losses_postprocess"):
-                    # noinspection PyTypeChecker
-                    actor_loss1: Tensor = policy_loss1 + exploration_loss1 + kl_loss1
-                    critic_loss1 = value_loss1
-                    ppo_loss1: Tensor = actor_loss1 + critic_loss1
-
-                    actor_loss2: Tensor = policy_loss2 + exploration_loss2 + kl_loss2
-                    critic_loss2 = value_loss2
-                    ppo_loss2: Tensor = actor_loss2 + critic_loss2
-
-                    epoch_actor_losses[batch_num] = (actor_loss1 + actor_loss2)/2
-
-                    divergence_loss = torch.nn.KLDivLoss(reduction="batchmean")
-                    # Detach action_distribution2
-                    # action_distribution2 = action_distribution2.
-                    kd_loss = divergence_loss(action_distribution1.log_probs/self.cfg.temp, action_distribution2.log_probs.detach()/self.cfg.temp)
-                    loss = ppo_loss1 + ppo_loss2 + self.cfg.weight_kd * kd_loss
-
-                    high_loss = 30.0
-                    if torch.abs(loss) > high_loss:
-                        log.warning(
-                            "High loss value: l:%.4f pl:%.4f vl:%.4f exp_l:%.4f kl_l:%.4f (recommended to adjust the --reward_scale parameter)",
-                            to_scalar(loss),
-                            to_scalar(policy_loss1 + policy_loss2),
-                            to_scalar(value_loss1 + value_loss2),
-                            to_scalar(exploration_loss1 + exploration_loss2),
-                            to_scalar(kl_loss1 + kl_loss2),
-                        )
-
-                        # perhaps something weird is happening, we definitely want summaries from this step
-                        force_summaries = True
-
-                with torch.no_grad(), timing.add_time("kl_divergence"):
-                    # if kl_old is not None, it is already calculated above
-                    if kl_old1 is None:
-                        # calculate KL-divergence with the behaviour policy action distribution
-                        old_action_distribution = get_action_distribution(
-                            self.actor_critic.action_space,
-                            mb.action_logits,
-                        )
-                        kl_old1 = action_distribution1.kl_divergence(old_action_distribution)
-                        kl_old1 = masked_select(kl_old1, mb.valids, num_invalids)
-                        kl_old2 = action_distribution2.kl_divergence(old_action_distribution)
-                        kl_old2 = masked_select(kl_old2, mb.valids, num_invalids)
-
-                    kl_old_mean = (kl_old1.mean().item() + kl_old2.mean().item())/2
-                    recent_kls.append(kl_old_mean)
-                    if kl_old1.max().item() > 100:
-                        log.warning(f"KL-divergence is very high: {kl_old1.max().item():.4f}")
-
-                # update the weights
-                with timing.add_time("update"):
-                    # following advice from https://youtu.be/9mS1fIYj1So set grad to None instead of optimizer.zero_grad()
-                    for p in self.actor_critic.parameters():
-                        p.grad = None
-
-                    loss.backward()
-
-                    if self.cfg.max_grad_norm > 0.0:
-                        with timing.add_time("clip"):
-                            torch.nn.utils.clip_grad_norm_(self.actor_critic.parameters(), self.cfg.max_grad_norm)
-
-                    curr_policy_version = self.train_step  # policy version before the weight update
-
-                    actual_lr = self.curr_lr
-                    if num_invalids > 0:
-                        # if we have masked (invalid) data we should reduce the learning rate accordingly
-                        # this prevents a situation where most of the data in the minibatch is invalid
-                        # and we end up doing SGD with super noisy gradients
-                        actual_lr = self.curr_lr * (experience_size - num_invalids) / experience_size
-                    self._apply_lr(actual_lr)
-
-                    with self.param_server.policy_lock:
-                        self.optimizer.step()
-
-                    num_sgd_steps += 1
-
-                with torch.no_grad(), timing.add_time("after_optimizer"):
-                    self._after_optimizer_step()
-
-                    if self.lr_scheduler.invoke_after_each_minibatch():
-                        self.curr_lr = self.lr_scheduler.update(self.curr_lr, recent_kls)
-
-                    # collect and report summaries
-                    should_record_summaries = with_summaries
-                    should_record_summaries &= epoch == summaries_epoch and batch_num == summaries_batch
-                    should_record_summaries |= force_summaries
-                    if should_record_summaries:
-                        # hacky way to collect all of the intermediate variables for summaries
-                        summary_vars = {**loss_locals, **locals()}
-                        stats_and_summaries = self._record_summaries(AttrDict(summary_vars))
-                        force_summaries = False
-
-                    # make sure everything (such as policy weights) is committed to shared device memory
-                    synchronize(self.cfg, self.device)
-                    # this will force policy update on the inference worker (policy worker)
-                    self.policy_versions_tensor[self.policy_id] = self.train_step
-
-            # end of an epoch
-            if self.lr_scheduler.invoke_after_each_epoch():
-                self.curr_lr = self.lr_scheduler.update(self.curr_lr, recent_kls)
-
-            new_epoch_actor_loss = epoch_actor_losses.mean().item()
-            loss_delta_abs = abs(prev_epoch_actor_loss - new_epoch_actor_loss)
-            if loss_delta_abs < early_stopping_tolerance:
-                early_stop = True
-                log.debug(
-                    "Early stopping after %d epochs (%d sgd steps), loss delta %.7f",
-                    epoch + 1,
-                    num_sgd_steps,
-                    loss_delta_abs,
-                )
-                break
-
-            prev_epoch_actor_loss = new_epoch_actor_loss
-
-        return stats_and_summaries
+            return stats_and_summaries
 
     def _record_summaries(self, train_loop_vars) -> AttrDict:
         var = train_loop_vars
@@ -491,6 +494,7 @@ class SefarLearner(Learner):
 
         for key, value in stats.items():
             stats[key] = to_scalar(value)
+            # print(key, value)
 
         return stats
 
