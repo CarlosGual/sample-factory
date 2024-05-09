@@ -230,6 +230,12 @@ class TupleActionDistribution:
         log_probs = self._calc_log_probs(list_of_action_batches)
         return log_probs
 
+    @property
+    def log_probs(self):
+        if self.log_p is None:
+            self.log_p = functional.log_softmax(self.raw_logits, dim=-1)
+        return self.log_p
+
     def entropy(self):
         entropies = [d.entropy().unsqueeze(dim=1) for d in self.distributions]
         entropies = torch.cat(entropies, dim=1)

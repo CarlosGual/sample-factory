@@ -12,7 +12,7 @@ tensorboard --logdir=<your_train_dir> --port=6006
 Additionally, we provide a helper script that has nice command line interface to monitor select experiment folders using wildcards:
 
 ```bash
-python -m sample_factory.utils.tb --dir=./train_dir '*name_mask*' '*another*mask*'
+python -m sample_factory.scripts.tb --dir=./train_dir '*name_mask*' '*another*mask*'
 ```
 
 Here `--dir` parameter is the root directory with experiments, and the script will recursively search for experiment folders that match the masks.

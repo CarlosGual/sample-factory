@@ -13,10 +13,10 @@ This is an old/unsupported script, update for SF2 API would be needed.
 # import numpy as np
 # import torch
 #
-# from sample_factory.algo.utils.make_env import NonBatchedMultiAgentWrapper, is_multiagent_env
+# from sample_factory.algo.scripts.make_env import NonBatchedMultiAgentWrapper, is_multiagent_env
 # from sample_factory.cfg.arguments import load_from_checkpoint
 # from sample_factory.envs.create_env import create_env
-# from sample_factory.utils.utils import AttrDict, log
+# from sample_factory.scripts.scripts import AttrDict, log
 #
 #
 # class Rival:
