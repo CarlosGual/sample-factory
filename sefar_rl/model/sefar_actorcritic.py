@@ -91,8 +91,8 @@ class SefarActorCritic(ActorCritic):
         return x, new_rnn_states
 
     def forward_tail(self, core_output, values_only: bool, sample_actions: bool) -> TensorDict:
-        if self.cfg.update_mask:
-            self.mask = self._update_mask(core_output.shape)
+        # if self.cfg.update_mask:
+        #     self.mask = self._update_mask(core_output.shape)
 
         check_tensor(core_output, 'before masked core_output')
         core_output_sparse = core_output * self.mask
@@ -148,5 +148,10 @@ class SefarActorCritic(ActorCritic):
             assert actions.dim() == 2  # TODO: remove this once we test everything
             result["actions"] = actions.squeeze(dim=1)
 
-def make_sefar_actorcritic(model_factory, cfg: Config, obs_space: ObsSpace, action_space: ActionSpace) -> SefarActorCritic:
+
+def make_sefar_actorcritic(cfg: Config, obs_space: ObsSpace, action_space: ActionSpace) -> SefarActorCritic:
+    from sample_factory.algo.utils.context import global_model_factory
+
+    model_factory = global_model_factory()
+
     return SefarActorCritic(model_factory, cfg, obs_space, action_space)

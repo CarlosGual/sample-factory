@@ -49,6 +49,7 @@ def parse_sf_args(
         add_eval_args(p)
 
     args, _ = p.parse_known_args(argv)
+
     return p, args
 
 
@@ -58,6 +59,7 @@ def parse_full_cfg(parser: argparse.ArgumentParser, argv: Optional[List[str]] = 
         argv = sys.argv[1:]
 
     args = parser.parse_args(argv)
+
     args = postprocess_args(args, argv, parser)
     return args
 
@@ -84,7 +86,9 @@ def postprocess_args(args, argv, parser) -> argparse.Namespace:
     for arg_name in vars(args).keys():
         no_defaults_parser.set_defaults(**{arg_name: None})
     cli_args = no_defaults_parser.parse_args(argv)
-
+    # print(f'args: {args}')
+    # print(f'argv: {argv}')
+    # print(f'cli_args: {cli_args}')
     for arg_name in list(vars(cli_args).keys()):
         if cli_args.__dict__[arg_name] is None:
             del cli_args.__dict__[arg_name]

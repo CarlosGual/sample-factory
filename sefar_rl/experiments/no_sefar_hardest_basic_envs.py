@@ -6,11 +6,8 @@ _params = ParamGrid(
         (
             "env",
             [
-                "doom_my_way_home",
                 "doom_deadly_corridor",
-                "doom_defend_the_center",
                 "doom_defend_the_line",
-                "doom_health_gathering",
                 "doom_health_gathering_supreme",
             ],
         ),
@@ -24,14 +21,14 @@ _params = ParamGrid(
 
 _experiments = [
     Experiment(
-        "basic_envs_no_sefar",
-        "python -m sefar_rl.train_sefar_resnet --restart_behavior overwrite --train_dir train_dir "
-        "--train_for_env_steps=300000000 --algo=APPO --env_frameskip=4 --use_rnn=True --num_workers 48 "
+        "no_sefar_hardest_basic_envs",
+        "python -m sefar_rl.train_resnet --restart_behavior overwrite --train_dir train_dir "
+        "--train_for_env_steps=500000000 --algo=APPO --env_frameskip=4 --use_rnn=True --num_workers 48 "
         "--num_envs_per_worker=30 --worker_num_splits 2 --num_policies=1 --batch_size=4096 --wide_aspect_ratio=False "
-        "--res_w 128 --res_h 72 --num_batches_per_epoch=4 --with_wandb=True --wandb_user=aklab "
+        "--res_w 128 --res_h 72 --num_batches_per_epoch=4 --with_sefar False --with_wandb=False --wandb_user=aklab "
         "--wandb_project=sefar-rl --wandb_tags doom appo no_sefar",
         _params.generate_params(randomize=False),
     ),
 ]
 
-RUN_DESCRIPTION = RunDescription("sefar_doom_basic_envs", experiments=_experiments)
+RUN_DESCRIPTION = RunDescription("no_sefar_hardest_basic_envs", experiments=_experiments)

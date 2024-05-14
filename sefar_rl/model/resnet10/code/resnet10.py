@@ -1,10 +1,10 @@
-import torch
-# from torch.autograd import Variable
+import torch.jit
 import torch.nn as nn
 import math
-import numpy as np
-import torch.nn.functional as F
-from torch.nn.utils.weight_norm import WeightNorm
+
+from sample_factory.utils.typing import ObsSpace
+
+from sample_factory.algo.utils.torch_utils import calc_num_elements
 
 
 def init_layer(L):
@@ -125,13 +125,14 @@ class BottleneckBlock(nn.Module):
 
 
 class ResNet(nn.Module):
-    def __init__(self, block, list_of_num_layers, list_of_out_dims, flatten=False, parallel=False):
+    def __init__(self, block, list_of_num_layers, list_of_out_dims,  obs_space: ObsSpace, flatten=False):
         # list_of_num_layers specifies number of layers in each stage
         # list_of_out_dims specifies number of output channel for each stage
         super(ResNet, self).__init__()
         assert len(list_of_num_layers) == 4, 'Can have only four stages'
+        assert obs_space.shape[0] == 3, 'Input must be 3-dimensional (RGB) image'
 
-        conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3,
+        conv1 = nn.Conv2d(obs_space.shape[0], 64, kernel_size=7, stride=2, padding=3,
                           bias=False)
         bn1 = nn.BatchNorm2d(64)
 
@@ -163,7 +164,9 @@ class ResNet(nn.Module):
 
         self.trunk = nn.Sequential(*trunk)
 
-    def forward(self, x, ret_layers = None):
+        self.encoder_out_size = calc_num_elements(self.trunk, obs_space.shape)
+
+    def forward(self, x, ret_layers=None):
         if ret_layers is None:
             out = self.trunk(x)
             return out
@@ -175,11 +178,15 @@ class ResNet(nn.Module):
                     ret_features.append(x)
             return ret_features, x
 
-
-def ResNet10(flatten=True):
-    return ResNet(SimpleBlock, [1, 1, 1, 1], [64, 128, 256, 512], flatten)
-
+    def get_out_size(self) -> int:
+        return self.encoder_out_size
 
 
-
-
+def ResNet10(flatten, obs_space: ObsSpace):
+    return ResNet(
+        SimpleBlock,
+        [1, 1, 1, 1],
+        [64, 128, 256, 512],
+        obs_space=obs_space,
+        flatten=flatten,
+    )
