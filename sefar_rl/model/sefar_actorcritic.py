@@ -73,11 +73,10 @@ class SefarActorCritic(ActorCritic):
     def action_distributions(self):
         return self.last_action_distribution1, self.last_action_distribution2
 
-    def _update_mask(self, feature_shape):
-        mask = torch.rand(feature_shape, device=self.device)
-        mask[mask <= self.cfg.sparsity] = 0.
-        mask[mask != 0] = 1.
-        return mask
+    def _update_mask(self):
+        self._mask.uniform_()
+        self._mask[self._mask <= self.cfg.sparsity] = 0.
+        self._mask[self._mask != 0] = 1.
 
     def forward_head(self, normalized_obs_dict: Dict[str, Tensor]) -> Tensor:
         x = self.encoder(normalized_obs_dict)
@@ -86,13 +85,12 @@ class SefarActorCritic(ActorCritic):
 
     def forward_core(self, head_output: Tensor, rnn_states):
         x, new_rnn_states = self.core(head_output, rnn_states)
-        # check_tensor(x, 'x after forward_core')
         check_tensor(new_rnn_states, 'new_rnn_states')
         return x, new_rnn_states
 
     def forward_tail(self, core_output, values_only: bool, sample_actions: bool) -> TensorDict:
-        # if self.cfg.update_mask:
-        #     self.mask = self._update_mask(core_output.shape)
+        if self.cfg.update_mask:
+            self._update_mask()
 
         check_tensor(core_output, 'before masked core_output')
         core_output_sparse = core_output * self.mask

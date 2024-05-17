@@ -4,18 +4,18 @@
 #$ -j y
 #$ -l h_rt=24:00:00
 #$ -o slurm_logs/$JOB_NAME_$JOB_ID.out
-#$ -N sweep_doom_deadly_corridor_sefar
+#$ -N sweep_doom_health_gathering_supreme_sefar
 
 # Set up conda
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate sefar-rl
 
 exp_name="sweep_sefar"
-env_name="doom_deadly_corridor"
+env_name="doom_health_gathering_supreme"
 EXPERIMENT="${exp_name}_${env_name}"
 num_cpus=$(nproc)
 
-python -m sefar_rl.train_sefar_resnet_with_sweeps \
+python -m sefar_rl.launch_sweep_agent \
  --env $env_name \
  --train_dir train_dir \
  --restart_behavior overwrite \
@@ -40,4 +40,5 @@ python -m sefar_rl.train_sefar_resnet_with_sweeps \
  --wandb_user aklab \
  --wandb_project sefar-rl \
  --wandb_tags doom appo with_sefar sweep \
- --sweep_count 500
+ --sweep_count 500 \
+ --sweep_id aklab/sefar-rl/ye1ylj46

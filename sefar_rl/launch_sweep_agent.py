@@ -40,27 +40,14 @@ def parse_vizdoom_cfg(argv=None, evaluation=False):
     # parameters specific to SEFAR
     tsubame_override_defaults(parser)
     add_sefar_args(parser)
+    parser.add_argument(
+        "--sweep_id",
+        type=str,
+        help="sweep_id to add more wandb agents to the sweep",
+    )
     # second parsing pass yields the final configuration
     final_cfg = parse_full_cfg(parser, argv)
     return final_cfg
-
-
-def create_sweep_conf(config):
-    sweep_conf = {
-        "name": config.experiment,
-        "entity": "aklab",
-        "project": "sefar-rl",
-        "method": "bayes",
-        "metric": {"name": "reward/reward", "goal": "maximize"},
-        "parameters": {
-            "sparsity": {"min": 0.1, "max": 0.9},
-            "update_mask": {"values": [True, False]},
-            "temp": {"min": 1.0, "max": 10.0},
-            "weight_kd": {"min": 0.1, "max": 10.0},
-            "forward_head": {"values": [1, 2]},
-        },
-    }
-    return sweep_conf
 
 
 def main():  # pragma: no cover
@@ -73,5 +60,4 @@ def main():  # pragma: no cover
 
 if __name__ == "__main__":  # pragma: no cover
     cfg = parse_vizdoom_cfg()
-    sweep_id = wandb.sweep(create_sweep_conf(cfg))
-    sys.exit(wandb.agent(sweep_id=sweep_id, function=main, count=cfg.sweep_count))
+    sys.exit(wandb.agent(sweep_id=cfg.sweep_id, function=main, count=cfg.sweep_count))

@@ -10,12 +10,12 @@ source ~/miniconda3/etc/profile.d/conda.sh
 conda activate sefar-rl
 
 exp_name="testeos"
-env_name="doom_deadly_corridor"
+env_name="doom_health_gathering_supreme"
 EXPERIMENT="${exp_name}_${env_name}"
 num_cpus=2 #$(nproc)
 
 python -m sefar_rl.train_sefar_resnet \
- --update_mask False \
+ --update_mask True \
  --with_sefar True \
  --env $env_name \
  --train_dir pruebas \
@@ -30,14 +30,14 @@ python -m sefar_rl.train_sefar_resnet \
  --num_workers "$num_cpus" \
  --update_mask False \
  --num_policies 1 \
- --batch_size 4096 \
- --num_batches_per_epoch 1 \
+ --batch_size 2048 \
+ --num_batches_per_epoch 4 \
  --experiment $EXPERIMENT \
  --res_w 128 \
  --res_h 72 \
  --wide_aspect_ratio False \
  --policy_workers_per_policy 2 \
- --with_wandb False \
+ --with_wandb True \
  --wandb_user aklab \
  --wandb_project sefar-rl
 # --wandb_tags test doom appo
